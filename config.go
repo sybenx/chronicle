@@ -29,6 +29,7 @@ type Config struct {
 	SkipDeletions        bool
 	Negentropy           bool
 	NegentropyAuth       bool
+	DMAcceptAll          bool
 }
 
 func LoadConfig() Config {
@@ -72,6 +73,10 @@ func LoadConfig() Config {
 		os.Setenv("NEGENTROPY_AUTH", "TRUE")
 	}
 
+	if os.Getenv("DM_ACCEPT_ALL") == "" {
+		os.Setenv("DM_ACCEPT_ALL", "TRUE")
+	}
+
 	if os.Getenv("BLOSSOM_MAX_FILE_MB") == "" {
 		os.Setenv("BLOSSOM_MAX_FILE_MB", "10")
 	}
@@ -102,6 +107,7 @@ func LoadConfig() Config {
 		SkipDeletions:        getEnv("SKIP_DELETIONS") == "TRUE",
 		Negentropy:           getEnv("NEGENTROPY") == "TRUE",
 		NegentropyAuth:       getEnv("NEGENTROPY_AUTH") == "TRUE",
+		DMAcceptAll:          getEnv("DM_ACCEPT_ALL") == "TRUE",
 	}
 
 	return config

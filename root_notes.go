@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"log"
 	"os"
 	"strings"
 	"sync"
@@ -21,6 +22,8 @@ type RootNotes struct {
 	mu       sync.RWMutex
 	notes    map[string]string // id -> state ("", "EX", "OL", "AR")
 	filename string
+	version  uint64 // bumped on every change
+	saved    uint64 // version last written to disk
 }
 
 func NewRootNotes(filename string) *RootNotes {
@@ -39,7 +42,11 @@ func (r *RootNotes) Size() int {
 func (r *RootNotes) Add(id, state string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if prev, exists := r.notes[id]; exists && prev == state {
+		return
+	}
 	r.notes[id] = state
+	r.version++
 }
 
 func (r *RootNotes) Include(id string) bool {
@@ -66,17 +73,27 @@ func (r *RootNotes) Snapshot() map[string]string {
 	return copied
 }
 
+// SaveToFile writes to a temporary file and renames it over the old one, so a
+// crash mid-write never leaves a truncated list behind
 func (r *RootNotes) SaveToFile() error {
-	file, err := os.Create(r.filename)
+	r.mu.RLock()
+	version := r.version
+	notes := make(map[string]string, len(r.notes))
+	for id, state := range r.notes {
+		notes[id] = state
+	}
+	r.mu.RUnlock()
+
+	tmpName := r.filename + ".tmp"
+	file, err := os.Create(tmpName)
 	if err != nil {
 		return err
 	}
+	defer os.Remove(tmpName)
 	defer file.Close()
 
-	r.mu.RLock()
-	defer r.mu.RUnlock()
 	writer := bufio.NewWriter(file)
-	for id, state := range r.notes {
+	for id, state := range notes {
 		line := id
 		if state != "" {
 			line = id + " " + state
@@ -85,7 +102,36 @@ func (r *RootNotes) SaveToFile() error {
 			return err
 		}
 	}
-	return writer.Flush()
+	if err := writer.Flush(); err != nil {
+		return err
+	}
+	if err := file.Sync(); err != nil {
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, r.filename); err != nil {
+		return err
+	}
+
+	r.mu.Lock()
+	r.saved = max(r.saved, version)
+	r.mu.Unlock()
+	return nil
+}
+
+// SaveIfDirty persists the list only when it changed since the last save
+func (r *RootNotes) SaveIfDirty() {
+	r.mu.RLock()
+	dirty := r.version != r.saved
+	r.mu.RUnlock()
+	if !dirty {
+		return
+	}
+	if err := r.SaveToFile(); err != nil {
+		log.Printf("Error saving root notes: %v", err)
+	}
 }
 
 func addEventToRootList(event nostr.Event) {

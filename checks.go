@@ -12,9 +12,11 @@ func acceptedEvent(event nostr.Event) bool {
 		return true
 
 	} else if event.Kind == nostr.KindGiftWrap {
+		// Gift wraps are signed by a random one-time key (NIP-59), so the sender
+		// can't be checked against the WoT: accept all of them or gate them by PoW
 		for tag := range event.Tags.FindAll("p") {
 			if tag[1] == config.OwnerPubkey {
-				return (belongsToWotNetwork(event) || nip13.Difficulty(event.ID) >= config.PowDMWhitelist)
+				return config.DMAcceptAll || nip13.Difficulty(event.ID) >= config.PowDMWhitelist
 			}
 		}
 		return false

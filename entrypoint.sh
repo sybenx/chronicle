@@ -25,6 +25,7 @@ ALL_VARS=(
   "BLOSSOM_BACKUP_MEDIA"
   "BLOSSOM_ASSETS_PATH"
   "SKIP_DELETIONS"
+  "DM_ACCEPT_ALL"
 )
 
 # Check if all required environment variables are set

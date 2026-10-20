@@ -11,8 +11,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"text/template"
 	"time"
 
@@ -34,12 +36,7 @@ var assets embed.FS
 var pool atomic.Pointer[nostr.Pool]
 var store eventstore.Store
 var rootNotesList *RootNotes
-var relays []string
 var config Config
-var trustNetwork []string
-var oneHopNetwork []string
-var trustNetworkMap map[string]bool
-var pubkeyFollowerCount = make(map[string]int)
 
 func relayPool() *nostr.Pool {
 	return pool.Load()
@@ -102,7 +99,7 @@ func main() {
 	relay.Info.Software = "https://github.com/dtonon/chronicle"
 	relay.Info.Version = version.String()
 
-	appendPubkey(config.OwnerPubkey)
+	initTrustNetwork(config.OwnerPubkey)
 
 	db := getDB()
 	if err := db.Init(); err != nil {
@@ -111,6 +108,7 @@ func main() {
 	store = &db
 
 	relay.UseEventstore(store, 500)
+	protectRestrictedEvents(relay, ownerPubkey)
 	relay.Negentropy = config.Negentropy
 
 	rootNotesList = NewRootNotes(config.DBPath + "root_notes")
@@ -282,8 +280,26 @@ func main() {
 		}
 	}()
 
+	// Threads are tracked in memory as events arrive, persist them often and
+	// on shutdown so a restart doesn't drop them
+	go func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			rootNotesList.SaveIfDirty()
+		}
+	}()
+	go func() {
+		signals := make(chan os.Signal, 1)
+		signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
+		<-signals
+		log.Println("👋 Shutting down, saving tracked threads")
+		rootNotesList.SaveIfDirty()
+		os.Exit(0)
+	}()
+
 	log.Println("🎉 Relay running on port", config.RelayPort)
-	err := http.ListenAndServe(":"+config.RelayPort, relay)
+	err := http.ListenAndServe(":"+config.RelayPort, guardBlossomWrites(relay, ownerPubkey))
 	if err != nil {
 		log.Fatal(err)
 	}
