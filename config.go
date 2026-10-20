@@ -25,6 +25,7 @@ type Config struct {
 	BlossomPublicURL     string
 	BackupBlossomMedia   bool
 	MaxFileSizeMB        int
+	ReactedMaxFileSizeMB int
 	FetchAllInteractions bool
 	SkipDeletions        bool
 	Negentropy           bool
@@ -81,10 +82,15 @@ func LoadConfig() Config {
 		os.Setenv("BLOSSOM_MAX_FILE_MB", "10")
 	}
 
+	if os.Getenv("BLOSSOM_REACTED_MAX_FILE_MB") == "" {
+		os.Setenv("BLOSSOM_REACTED_MAX_FILE_MB", "100")
+	}
+
 	minFollowers, _ := strconv.Atoi(os.Getenv("MIN_FOLLOWERS"))
 	PowWhitelist, _ := strconv.Atoi(os.Getenv("POW_WHITELIST"))
 	PowDMWhitelist, _ := strconv.Atoi(os.Getenv("POW_DM_WHITELIST"))
 	maxFileSizeMB, _ := strconv.Atoi(os.Getenv("BLOSSOM_MAX_FILE_MB"))
+	reactedMaxFileSizeMB, _ := strconv.Atoi(os.Getenv("BLOSSOM_REACTED_MAX_FILE_MB"))
 
 	config := Config{
 		OwnerPubkey:          getEnv("OWNER_PUBKEY"),
@@ -103,6 +109,7 @@ func LoadConfig() Config {
 		BlossomPublicURL:     getEnv("BLOSSOM_PUBLIC_URL"),
 		BackupBlossomMedia:   getEnv("BLOSSOM_BACKUP_MEDIA") == "TRUE",
 		MaxFileSizeMB:        maxFileSizeMB,
+		ReactedMaxFileSizeMB: reactedMaxFileSizeMB,
 		FetchAllInteractions: getEnv("FETCH_ALL_INTERACTIONS") == "TRUE",
 		SkipDeletions:        getEnv("SKIP_DELETIONS") == "TRUE",
 		Negentropy:           getEnv("NEGENTROPY") == "TRUE",

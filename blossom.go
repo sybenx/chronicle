@@ -7,9 +7,11 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -89,7 +91,7 @@ func bootstrapOwnerBlossomFiles() {
 
 	for hash, urls := range missingFiles {
 		for _, url := range urls {
-			if err := downloadBlossomFile(url, hash, false); err == nil {
+			if err := downloadBlossomFile(url, hash, noSizeLimit); err == nil {
 				downloaded++
 				log.Printf("✅ Downloaded missing owner file: %s", hash[:16]+"...")
 				break
@@ -151,20 +153,30 @@ func isFileAlreadyDownloaded(hash string) bool {
 	return !os.IsNotExist(err)
 }
 
-func downloadBlossomFile(url, hash string, enforceMaxSize bool) error {
+// downloadBlossomFile fetches url and stores it under hash once the content
+// hashes to it. A negative maxBytes (noSizeLimit) means no size limit
+func downloadBlossomFile(rawURL, hash string, maxBytes int64) error {
 	if isFileAlreadyDownloaded(hash) {
 		return nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return err
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf("unsupported scheme %q", parsed.Scheme)
+	}
+
+	ctx, cancel := mediaContext(maxBytes)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", rawURL, nil)
 	if err != nil {
 		return err
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := mediaHTTPClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -174,11 +186,8 @@ func downloadBlossomFile(url, hash string, enforceMaxSize bool) error {
 		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
 	}
 
-	if enforceMaxSize && resp.ContentLength > 0 {
-		maxSize := int64(config.MaxFileSizeMB * 1024 * 1024)
-		if resp.ContentLength > maxSize {
-			return fmt.Errorf("file too large: %d bytes (max %d MB)", resp.ContentLength, config.MaxFileSizeMB)
-		}
+	if maxBytes >= 0 && resp.ContentLength > maxBytes {
+		return fmt.Errorf("file too large: %d bytes (max %d MB)", resp.ContentLength, maxBytes/(1024*1024))
 	}
 
 	// A unique temp name, so concurrent downloads of the same hash don't collide
@@ -193,27 +202,17 @@ func downloadBlossomFile(url, hash string, enforceMaxSize bool) error {
 	}()
 
 	hasher := sha256.New()
-	var written int64
+	var body io.Reader = resp.Body
+	if maxBytes >= 0 {
+		body = io.LimitReader(resp.Body, maxBytes+1)
+	}
 
-	if enforceMaxSize {
-		maxSize := int64(config.MaxFileSizeMB * 1024 * 1024)
-		limitedReader := io.LimitReader(resp.Body, maxSize+1)
-		teeReader := io.TeeReader(limitedReader, hasher)
-
-		written, err = io.Copy(file, teeReader)
-		if err != nil {
-			return err
-		}
-
-		if written > maxSize {
-			return fmt.Errorf("file too large: %d bytes (max %d MB)", written, config.MaxFileSizeMB)
-		}
-	} else {
-		teeReader := io.TeeReader(resp.Body, hasher)
-		written, err = io.Copy(file, teeReader)
-		if err != nil {
-			return err
-		}
+	written, err := io.Copy(file, io.TeeReader(body, hasher))
+	if err != nil {
+		return err
+	}
+	if maxBytes >= 0 && written > maxBytes {
+		return fmt.Errorf("file too large: %d bytes (max %d MB)", written, maxBytes/(1024*1024))
 	}
 
 	calculatedHash := fmt.Sprintf("%x", hasher.Sum(nil))
@@ -288,10 +287,10 @@ func getUserWriteRelays(authorPubkey string) []string {
 	return writeRelays
 }
 
-func tryDownloadFromServers(servers []string, hash string, enforceMaxSize bool) bool {
+func tryDownloadFromServers(servers []string, hash string, maxBytes int64) bool {
 	for _, server := range servers {
-		url := fmt.Sprintf("%s/%s", server, hash)
-		if err := downloadBlossomFile(url, hash, enforceMaxSize); err == nil {
+		serverURL := fmt.Sprintf("%s/%s", strings.TrimRight(server, "/"), hash)
+		if err := downloadBlossomFile(serverURL, hash, maxBytes); err == nil {
 			log.Printf("✅ Downloaded from server: %s", server)
 			return true
 		}
@@ -299,7 +298,7 @@ func tryDownloadFromServers(servers []string, hash string, enforceMaxSize bool) 
 	return false
 }
 
-func downloadFromAltBlossomServers(authorPubkey string, hash string, enforceMaxSize bool) bool {
+func downloadFromAltBlossomServers(authorPubkey string, hash string, maxBytes int64) bool {
 	ctx := context.Background()
 	timeout, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
@@ -328,7 +327,7 @@ func downloadFromAltBlossomServers(authorPubkey string, hash string, enforceMaxS
 		servers := extractServersFromEvent(serverListEvent)
 		if len(servers) > 0 {
 			log.Printf("🔍 Trying servers from local DB for %s", authorPubkey[:8]+"...")
-			if tryDownloadFromServers(servers, hash, enforceMaxSize) {
+			if tryDownloadFromServers(servers, hash, maxBytes) {
 				return true
 			}
 		}
@@ -347,7 +346,7 @@ func downloadFromAltBlossomServers(authorPubkey string, hash string, enforceMaxS
 		servers := extractServersFromEvent(serverListEvent)
 		if len(servers) > 0 {
 			log.Printf("🔍 Trying servers from seedRelays for %s", authorPubkey[:8]+"...")
-			if tryDownloadFromServers(servers, hash, enforceMaxSize) {
+			if tryDownloadFromServers(servers, hash, maxBytes) {
 				return true
 			}
 		}
@@ -370,7 +369,7 @@ func downloadFromAltBlossomServers(authorPubkey string, hash string, enforceMaxS
 			servers := extractServersFromEvent(serverListEvent)
 			if len(servers) > 0 {
 				log.Printf("🔍 Trying servers from user's write relays for %s", authorPubkey[:8]+"...")
-				if tryDownloadFromServers(servers, hash, enforceMaxSize) {
+				if tryDownloadFromServers(servers, hash, maxBytes) {
 					return true
 				}
 			}
@@ -390,38 +389,125 @@ func extractServersFromEvent(event nostr.Event) []string {
 	return servers
 }
 
+const noSizeLimit int64 = -1
+
+// reactedTargets holds the IDs of events the owner reacted to or zapped, whose
+// media gets the larger ReactedMaxFileSizeMB cap
+var reactedTargets sync.Map
+
+func markReactedTarget(id nostr.ID) {
+	reactedTargets.Store(id, struct{}{})
+}
+
+func mediaSizeLimit(event nostr.Event) int64 {
+	if event.PubKey.Hex() == config.OwnerPubkey {
+		return noSizeLimit
+	}
+	if _, ok := reactedTargets.Load(event.ID); ok {
+		return int64(config.ReactedMaxFileSizeMB) * 1024 * 1024
+	}
+	return int64(config.MaxFileSizeMB) * 1024 * 1024
+}
+
+// mediaRef is one blob an event points to, with every URL that names it
+type mediaRef struct {
+	hash string
+	urls []string
+}
+
+// extractMediaRefs collects Blossom blobs from the content and from NIP-92
+// imeta tags, whose url may not carry the hash but whose x field does
+func extractMediaRefs(event nostr.Event) []mediaRef {
+	var refs []mediaRef
+	index := make(map[string]int)
+	add := func(hash string, urls ...string) {
+		hash = strings.ToLower(hash)
+		i, ok := index[hash]
+		if !ok {
+			i = len(refs)
+			index[hash] = i
+			refs = append(refs, mediaRef{hash: hash})
+		}
+		for _, u := range urls {
+			if u != "" && !slices.Contains(refs[i].urls, u) {
+				refs[i].urls = append(refs[i].urls, u)
+			}
+		}
+	}
+
+	for _, match := range blossomURLRegex.FindAllStringSubmatch(event.Content, -1) {
+		add(match[1], match[0])
+	}
+
+	for tag := range event.Tags.FindAll("imeta") {
+		var hash string
+		var urls []string
+		for _, field := range tag[1:] {
+			key, value, ok := strings.Cut(field, " ")
+			if !ok {
+				continue
+			}
+			value = strings.TrimSpace(value)
+			switch key {
+			case "x":
+				if sha256HexRegex.MatchString(value) {
+					hash = value
+				}
+			case "url", "fallback":
+				urls = append(urls, value)
+			}
+		}
+		if hash == "" {
+			for _, u := range urls {
+				if match := blossomURLRegex.FindStringSubmatch(u); match != nil {
+					hash = match[1]
+					break
+				}
+			}
+		}
+		if hash != "" {
+			add(hash, urls...)
+		}
+	}
+
+	return refs
+}
+
 func processBlossomBackup(event nostr.Event) {
 	if !config.BackupBlossomMedia {
 		return
 	}
 
-	matches := blossomURLRegex.FindAllString(event.Content, -1)
-	if len(matches) == 0 {
+	refs := extractMediaRefs(event)
+	if len(refs) == 0 {
 		return
 	}
 
 	go func() {
-		isOwnerEvent := event.PubKey.Hex() == config.OwnerPubkey
+		maxBytes := mediaSizeLimit(event)
 
-		for _, originalURL := range matches {
-			hashMatches := blossomURLRegex.FindStringSubmatch(originalURL)
-			if len(hashMatches) < 2 {
-				continue
-			}
-			hash := hashMatches[1]
-
-			if isFileAlreadyDownloaded(hash) {
+		for _, ref := range refs {
+			if isFileAlreadyDownloaded(ref.hash) {
 				continue
 			}
 
-			if err := downloadBlossomFile(originalURL, hash, !isOwnerEvent); err == nil {
+			downloaded := false
+			for _, u := range ref.urls {
+				err := downloadBlossomFile(u, ref.hash, maxBytes)
+				if err == nil {
+					downloaded = true
+					break
+				}
+				log.Printf("🔄 %s failed: %v", u, err)
+			}
+			if downloaded {
 				continue
 			}
 
-			log.Printf("🔄 Original URL %s failed, trying author's fallback servers", originalURL)
+			log.Printf("🔄 Trying author's fallback servers for %s", ref.hash[:16]+"...")
 
-			if !downloadFromAltBlossomServers(event.PubKey.Hex(), hash, !isOwnerEvent) {
-				log.Printf("⚠️  Failed to download Blossom file %s from all available sources", hash[:16]+"...")
+			if !downloadFromAltBlossomServers(event.PubKey.Hex(), ref.hash, maxBytes) {
+				log.Printf("⚠️  Failed to download Blossom file %s from all available sources", ref.hash[:16]+"...")
 			}
 		}
 	}()

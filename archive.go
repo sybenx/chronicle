@@ -158,7 +158,15 @@ func fetchConversation(event nostr.Event) {
 		if err != nil {
 			return
 		}
+		ownerInteraction := event.PubKey.Hex() == config.OwnerPubkey
+		if ownerInteraction {
+			markReactedTarget(refID)
+		}
 		for targetEvent := range store.QueryEvents(nostr.Filter{IDs: []nostr.ID{refID}}, 1) {
+			// Already archived, perhaps with media skipped under the smaller cap
+			if ownerInteraction {
+				go processBlossomBackup(targetEvent)
+			}
 			if rootRef := nip10.GetThreadRoot(targetEvent.Tags); rootRef != nil {
 				rootEventID = rootRef.AsTagReference()
 			}

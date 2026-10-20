@@ -122,7 +122,7 @@ func main() {
 
 	if config.BackupBlossomMedia {
 		initOwnerBlossomTracking()
-		log.Printf("📁 Blossom media backup enabled (max %d MB per file)", config.MaxFileSizeMB)
+		log.Printf("📁 Blossom media backup enabled (max %d MB per file, %d MB for notes you react to or zap)", config.MaxFileSizeMB, config.ReactedMaxFileSizeMB)
 	}
 
 	migrationMode := os.Getenv("MIGRATION_MODE") == "true"

@@ -4,6 +4,15 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+
+- `BLOSSOM_REACTED_MAX_FILE_MB` sets a larger media backup cap for notes the owner reacts to or zaps, 100 MB by default
+- Media backup reads NIP-92 `imeta` tags, including `x` hashes and `fallback` URLs
+
+### Security
+
+- Media backup no longer connects to loopback, private, link-local or CGNAT addresses, and only follows http(s) redirects
+
 ## [0.7.0] - 2026-10-16
 
 ### Added

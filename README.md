@@ -81,6 +81,12 @@ BLOSSOM_ASSETS_PATH="assets/"
 # Enable automatic backup of media for other authors
 BLOSSOM_BACKUP_MEDIA="TRUE"
 
+# Size cap in MB for other authors' media (default 10)
+BLOSSOM_MAX_FILE_MB="10"
+
+# Larger size cap in MB for media in notes you react to or zap (default 100)
+BLOSSOM_REACTED_MAX_FILE_MB="100"
+
 # Accept reactions and zaps for all notes in archived threads, not just owner notes
 FETCH_ALL_INTERACTIONS="FALSE"
 
