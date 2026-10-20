@@ -3,10 +3,12 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN go build -o chronicle . \
-    && go clean -modcache
+RUN go build -o chronicle .
 
-FROM golang:bookworm
+FROM debian:bookworm-slim
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 RUN mkdir -p /app/db
 RUN mkdir -p /app/assets
 COPY --from=build /app/chronicle /app

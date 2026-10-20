@@ -287,35 +287,31 @@ func fetchQuotedEvents(event nostr.Event) {
 
 	relaysToQuery := append(quoteRelays, seedRelays...)
 
-	go func() {
-		for ev := range relayPool().FetchMany(timeout, relaysToQuery, nostr.Filter{
-			IDs: func() []nostr.ID {
-				ids := make([]nostr.ID, 0, len(quoteIDs))
-				for _, h := range quoteIDs {
-					if id, err := nostr.IDFromHex(h); err == nil {
-						ids = append(ids, id)
-					}
+	for ev := range relayPool().FetchMany(timeout, relaysToQuery, nostr.Filter{
+		IDs: func() []nostr.ID {
+			ids := make([]nostr.ID, 0, len(quoteIDs))
+			for _, h := range quoteIDs {
+				if id, err := nostr.IDFromHex(h); err == nil {
+					ids = append(ids, id)
 				}
-				return ids
-			}(),
-		}, nostr.SubscriptionOptions{}) {
-			saveEvent(ev.Event)
-			go processBlossomBackup(ev.Event)
-		}
+			}
+			return ids
+		}(),
+	}, nostr.SubscriptionOptions{}) {
+		saveEvent(ev.Event)
+		go processBlossomBackup(ev.Event)
+	}
 
-		for ev := range relayPool().FetchMany(timeout, relaysToQuery, nostr.Filter{
-			Kinds: []nostr.Kind{
-				nostr.KindDeletion,
-				nostr.KindReaction,
-				nostr.KindZapRequest,
-				nostr.KindZap,
-			},
-			Tags: nostr.TagMap{"e": quoteIDs},
-		}, nostr.SubscriptionOptions{}) {
-			saveEvent(ev.Event)
-			go processBlossomBackup(ev.Event)
-		}
-	}()
-
-	<-timeout.Done()
+	for ev := range relayPool().FetchMany(timeout, relaysToQuery, nostr.Filter{
+		Kinds: []nostr.Kind{
+			nostr.KindDeletion,
+			nostr.KindReaction,
+			nostr.KindZapRequest,
+			nostr.KindZap,
+		},
+		Tags: nostr.TagMap{"e": quoteIDs},
+	}, nostr.SubscriptionOptions{}) {
+		saveEvent(ev.Event)
+		go processBlossomBackup(ev.Event)
+	}
 }

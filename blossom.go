@@ -17,6 +17,7 @@ import (
 	"fiatjaf.com/nostr"
 )
 
+var sha256HexRegex = regexp.MustCompile(`^[a-fA-F0-9]{64}$`)
 var blossomURLRegex = regexp.MustCompile(`https?://[^/\s]+/([a-fA-F0-9]{64})(?:\.[a-zA-Z0-9]+)?`)
 var ownerBlossomTrackingFile string
 var ownerBlossomMutex sync.Mutex
@@ -40,11 +41,9 @@ func bootstrapOwnerBlossomFiles() {
 		for _, entry := range entries {
 			if !entry.IsDir() {
 				filename := entry.Name()
-				if !strings.HasSuffix(filename, ".tmp") && len(filename) == 64 {
-					if _, err := filepath.Match("[a-fA-F0-9]*", filename); err == nil {
-						hashSet[filename] = true
-						filesFound++
-					}
+				if sha256HexRegex.MatchString(filename) {
+					hashSet[filename] = true
+					filesFound++
 				}
 			}
 		}
@@ -61,9 +60,13 @@ func bootstrapOwnerBlossomFiles() {
 
 	missingFiles := make(map[string][]string)
 	eventHashes := 0
+	eventsWithHashes := 0
 
 	for event := range store.QueryEvents(nostr.Filter{Authors: []nostr.PubKey{ownerPK}}, maxOwnerEvents) {
 		hashes := extractBlossomHashes(event.Content)
+		if len(hashes) > 0 {
+			eventsWithHashes++
+		}
 		for _, hash := range hashes {
 			eventHashes++
 			if !hashSet[hash] {
@@ -79,7 +82,7 @@ func bootstrapOwnerBlossomFiles() {
 		}
 	}
 
-	log.Printf("🔍 Found %d Blossom hashes in %d owner events", eventHashes, len(hashSet)-filesFound)
+	log.Printf("🔍 Found %d Blossom hashes in %d owner events", eventHashes, eventsWithHashes)
 
 	downloaded := 0
 	failed := 0
@@ -92,7 +95,7 @@ func bootstrapOwnerBlossomFiles() {
 				break
 			} else {
 				failed++
-				log.Printf("❌ Failed to download owner file: %s - %s", urls, err)
+				log.Printf("❌ Failed to download owner file: %s - %s", url, err)
 			}
 		}
 	}
@@ -178,11 +181,12 @@ func downloadBlossomFile(url, hash string, enforceMaxSize bool) error {
 		}
 	}
 
-	tempFile := filepath.Join(config.BlossomAssetsPath, hash+".tmp")
-	file, err := os.Create(tempFile)
+	// A unique temp name, so concurrent downloads of the same hash don't collide
+	file, err := os.CreateTemp(config.BlossomAssetsPath, hash+".*.tmp")
 	if err != nil {
 		return err
 	}
+	tempFile := file.Name()
 	defer func() {
 		file.Close()
 		os.Remove(tempFile)
@@ -217,7 +221,12 @@ func downloadBlossomFile(url, hash string, enforceMaxSize bool) error {
 		return fmt.Errorf("hash mismatch: expected %s, got %s", hash, calculatedHash)
 	}
 
-	file.Close()
+	if err := file.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tempFile, 0644); err != nil {
+		return err
+	}
 
 	finalPath := filepath.Join(config.BlossomAssetsPath, hash)
 	if err := os.Rename(tempFile, finalPath); err != nil {
@@ -416,4 +425,25 @@ func processBlossomBackup(event nostr.Event) {
 			}
 		}
 	}()
+}
+
+// writeFileAtomic writes through a temp file in the same directory and renames
+// it into place, so readers never see a partially written blob
+func writeFileAtomic(path string, data []byte) error {
+	file, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(file.Name())
+	if _, err := file.Write(data); err != nil {
+		file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(file.Name(), 0644); err != nil {
+		return err
+	}
+	return os.Rename(file.Name(), path)
 }

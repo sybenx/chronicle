@@ -9,22 +9,22 @@ import (
 )
 
 type Config struct {
-	OwnerPubkey        string
-	RelayName          string
-	RelayDescription   string
-	DBPath             string
-	RelayURL           string
-	RelayPort          string
-	RefreshInterval    int
-	MinFollowers       int
-	RelayContact       string
-	RelayIcon          string
-	PowWhitelist       int
-	PowDMWhitelist     int
-	BlossomAssetsPath  string
-	BlossomPublicURL   string
-	BackupBlossomMedia  bool
-	MaxFileSizeMB       int
+	OwnerPubkey          string
+	RelayName            string
+	RelayDescription     string
+	DBPath               string
+	RelayURL             string
+	RelayPort            string
+	RefreshInterval      int
+	MinFollowers         int
+	RelayContact         string
+	RelayIcon            string
+	PowWhitelist         int
+	PowDMWhitelist       int
+	BlossomAssetsPath    string
+	BlossomPublicURL     string
+	BackupBlossomMedia   bool
+	MaxFileSizeMB        int
 	FetchAllInteractions bool
 	SkipDeletions        bool
 	Negentropy           bool
@@ -87,22 +87,22 @@ func LoadConfig() Config {
 	maxFileSizeMB, _ := strconv.Atoi(os.Getenv("BLOSSOM_MAX_FILE_MB"))
 
 	config := Config{
-		OwnerPubkey:        getEnv("OWNER_PUBKEY"),
-		RelayName:          getEnv("RELAY_NAME"),
-		RelayDescription:   getEnv("RELAY_DESCRIPTION"),
-		RelayContact:       getEnv("RELAY_CONTACT"),
-		RelayIcon:          getEnv("RELAY_ICON"),
-		DBPath:             getEnv("DB_PATH"),
-		RelayURL:           getEnv("RELAY_URL"),
-		RelayPort:          getEnv("RELAY_PORT"),
-		RefreshInterval:    refreshInterval,
-		MinFollowers:       minFollowers,
-		PowWhitelist:       PowWhitelist,
-		PowDMWhitelist:     PowDMWhitelist,
-		BlossomAssetsPath:  getEnv("BLOSSOM_ASSETS_PATH"),
-		BlossomPublicURL:   getEnv("BLOSSOM_PUBLIC_URL"),
-		BackupBlossomMedia:  getEnv("BLOSSOM_BACKUP_MEDIA") == "TRUE",
-		MaxFileSizeMB:       maxFileSizeMB,
+		OwnerPubkey:          getEnv("OWNER_PUBKEY"),
+		RelayName:            getEnv("RELAY_NAME"),
+		RelayDescription:     getEnv("RELAY_DESCRIPTION"),
+		RelayContact:         getEnv("RELAY_CONTACT"),
+		RelayIcon:            getEnv("RELAY_ICON"),
+		DBPath:               getEnv("DB_PATH"),
+		RelayURL:             getEnv("RELAY_URL"),
+		RelayPort:            getEnv("RELAY_PORT"),
+		RefreshInterval:      refreshInterval,
+		MinFollowers:         minFollowers,
+		PowWhitelist:         PowWhitelist,
+		PowDMWhitelist:       PowDMWhitelist,
+		BlossomAssetsPath:    getEnv("BLOSSOM_ASSETS_PATH"),
+		BlossomPublicURL:     getEnv("BLOSSOM_PUBLIC_URL"),
+		BackupBlossomMedia:   getEnv("BLOSSOM_BACKUP_MEDIA") == "TRUE",
+		MaxFileSizeMB:        maxFileSizeMB,
 		FetchAllInteractions: getEnv("FETCH_ALL_INTERACTIONS") == "TRUE",
 		SkipDeletions:        getEnv("SKIP_DELETIONS") == "TRUE",
 		Negentropy:           getEnv("NEGENTROPY") == "TRUE",

@@ -1,10 +1,10 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"embed"
 	"fmt"
+	"html/template"
 	"io"
 	"io/fs"
 	"log"
@@ -15,7 +15,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"syscall"
-	"text/template"
 	"time"
 
 	"fiatjaf.com/nostr"
@@ -113,11 +112,9 @@ func main() {
 
 	rootNotesList = NewRootNotes(config.DBPath + "root_notes")
 	if err := rootNotesList.LoadFromFile(); err != nil {
-		fmt.Println("Error loading strings:", err)
-		return
-	} else {
-		log.Println("🗣️  Monitoring", rootNotesList.Size(), "threads")
+		log.Fatalf("Error loading root notes: %v", err)
 	}
+	log.Println("🗣️  Monitoring", rootNotesList.Size(), "threads")
 
 	if err := runMigrations(); err != nil {
 		log.Fatalf("Migration failed: %v", err)
@@ -190,8 +187,8 @@ func main() {
 	mux.Handle("/assets/", http.StripPrefix("/assets/", http.FileServer(http.FS(serverRoot))))
 	mux.Handle("/favicon.ico", http.FileServer(http.FS(serverRoot)))
 
+	tmpl := template.Must(template.New("index").Parse(indexHTML))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		tmpl := template.Must(template.New("index").Parse(indexHTML))
 		data := struct {
 			RelayName        string
 			RelayDescription string
@@ -215,11 +212,7 @@ func main() {
 	bl := blossom.New(relay, config.BlossomPublicURL)
 	bl.Store = blobIndex{blossom.EventStoreBlobIndexWrapper{Store: &db, ServiceURL: bl.ServiceURL}}
 	bl.StoreBlob = func(ctx context.Context, sha256 string, ext string, body []byte) error {
-		file, err := os.Create(config.BlossomAssetsPath + sha256)
-		if err != nil {
-			return err
-		}
-		if _, err := io.Copy(file, bytes.NewReader(body)); err != nil {
+		if err := writeFileAtomic(config.BlossomAssetsPath+sha256, body); err != nil {
 			return err
 		}
 		if config.BackupBlossomMedia {
@@ -228,8 +221,13 @@ func main() {
 		return nil
 	}
 	bl.LoadBlob = func(ctx context.Context, sha256 string, ext string) (io.ReadSeeker, *url.URL, error) {
+		// Return an untyped nil on error: a nil *os.File inside the interface
+		// looks like a valid reader to khatru and turns a 404 into a 500
 		reader, err := os.Open(config.BlossomAssetsPath + sha256)
-		return reader, nil, err
+		if err != nil {
+			return nil, nil, err
+		}
+		return reader, nil, nil
 	}
 	bl.DeleteBlob = func(ctx context.Context, sha256 string, ext string) error {
 		return os.Remove(config.BlossomAssetsPath + sha256)

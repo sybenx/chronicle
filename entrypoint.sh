@@ -44,4 +44,5 @@ for var in "${ALL_VARS[@]}"; do
   echo "$var=`printenv ${var}`" >> "$OUTPUT_FILE"
 done
 
-./chronicle
+# exec so the relay is PID 1 and receives SIGTERM from docker stop
+exec ./chronicle
