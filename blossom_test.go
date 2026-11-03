@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"slices"
 	"strings"
 	"testing"
 
@@ -83,6 +84,42 @@ func TestExtractMediaRefs(t *testing.T) {
 	}
 	if refs[2].hash != h3 {
 		t.Errorf("hash not taken from imeta url: %+v", refs[2])
+	}
+}
+
+func TestExtractMediaRefsBlossomURI(t *testing.T) {
+	h1 := strings.Repeat("a", 64)
+	h2 := strings.Repeat("b", 64)
+	h3 := strings.Repeat("c", 64)
+	pk1 := strings.Repeat("d", 64)
+	pk2 := strings.Repeat("e", 64)
+	event := nostr.Event{
+		Content: "pdf (blossom:" + h1 + ".pdf?xs=cdn.example&xs=https://b.example/&as=" + pk1 + "&sz=12), " +
+			"bare blossom:" + h2 + " and again https://a.example/" + h1 + ".pdf",
+		Tags: nostr.Tags{
+			{"imeta", "url blossom:" + h3 + ".png?as=" + pk2 + "&as=nothex", "m image/png"},
+		},
+	}
+
+	refs := extractMediaRefs(event)
+	if len(refs) != 3 {
+		t.Fatalf("got %d refs, want 3: %+v", len(refs), refs)
+	}
+
+	wantURLs := []string{
+		"https://a.example/" + h1 + ".pdf",
+		"https://cdn.example/" + h1 + ".pdf",
+		"http://cdn.example/" + h1 + ".pdf",
+		"https://b.example/" + h1 + ".pdf",
+	}
+	if refs[0].hash != h1 || !slices.Equal(refs[0].urls, wantURLs) || !slices.Equal(refs[0].authors, []string{pk1}) {
+		t.Errorf("blossom URI with hints wrong: %+v", refs[0])
+	}
+	if refs[1].hash != h2 || len(refs[1].urls) != 0 || len(refs[1].authors) != 0 {
+		t.Errorf("bare blossom URI wrong: %+v", refs[1])
+	}
+	if refs[2].hash != h3 || !slices.Equal(refs[2].authors, []string{pk2}) {
+		t.Errorf("imeta blossom URI wrong: %+v", refs[2])
 	}
 }
 

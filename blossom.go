@@ -21,6 +21,13 @@ import (
 
 var sha256HexRegex = regexp.MustCompile(`^[a-fA-F0-9]{64}$`)
 var blossomURLRegex = regexp.MustCompile(`https?://[^/\s]+/([a-fA-F0-9]{64})(?:\.[a-zA-Z0-9]+)?`)
+
+// blossomURIRegex matches BUD-10 links: blossom:<sha256>.<ext>?xs=<server>&as=<pubkey>
+var blossomURIRegex = regexp.MustCompile(`blossom:([a-fA-F0-9]{64})(\.[a-zA-Z0-9]+)?(\?[A-Za-z0-9._~:/%&=+-]*)?`)
+
+// maxURIAuthors caps the as= hints followed per blob, each costing a server list lookup
+const maxURIAuthors = 3
+
 var ownerBlossomTrackingFile string
 var ownerBlossomMutex sync.Mutex
 
@@ -411,8 +418,43 @@ func mediaSizeLimit(event nostr.Event) int64 {
 
 // mediaRef is one blob an event points to, with every URL that names it
 type mediaRef struct {
-	hash string
-	urls []string
+	hash    string
+	urls    []string
+	authors []string
+}
+
+// parseBlossomURI turns a BUD-10 link into its hash, the URLs its xs= server
+// hints point to and its as= author hints
+func parseBlossomURI(uri string) (hash string, urls, authors []string, ok bool) {
+	match := blossomURIRegex.FindStringSubmatch(uri)
+	if match == nil {
+		return "", nil, nil, false
+	}
+	hash = strings.ToLower(match[1])
+	ext := match[2]
+	if ext == "" {
+		ext = ".bin"
+	}
+
+	query, _ := url.ParseQuery(strings.TrimPrefix(match[3], "?"))
+	for _, server := range query["xs"] {
+		server = strings.TrimRight(server, "./")
+		if server == "" {
+			continue
+		}
+		if strings.HasPrefix(server, "https://") || strings.HasPrefix(server, "http://") {
+			urls = append(urls, server+"/"+hash+ext)
+		} else {
+			urls = append(urls, "https://"+server+"/"+hash+ext, "http://"+server+"/"+hash+ext)
+		}
+	}
+	for _, author := range query["as"] {
+		author = strings.ToLower(author)
+		if sha256HexRegex.MatchString(author) && !slices.Contains(authors, author) {
+			authors = append(authors, author)
+		}
+	}
+	return hash, urls, authors, true
 }
 
 // extractMediaRefs collects Blossom blobs from the content and from NIP-92
@@ -420,6 +462,14 @@ type mediaRef struct {
 func extractMediaRefs(event nostr.Event) []mediaRef {
 	var refs []mediaRef
 	index := make(map[string]int)
+	addAuthors := func(hash string, authors []string) {
+		ref := &refs[index[strings.ToLower(hash)]]
+		for _, a := range authors {
+			if !slices.Contains(ref.authors, a) {
+				ref.authors = append(ref.authors, a)
+			}
+		}
+	}
 	add := func(hash string, urls ...string) {
 		hash = strings.ToLower(hash)
 		i, ok := index[hash]
@@ -439,9 +489,16 @@ func extractMediaRefs(event nostr.Event) []mediaRef {
 		add(match[1], match[0])
 	}
 
+	for _, uri := range blossomURIRegex.FindAllString(event.Content, -1) {
+		if hash, urls, authors, ok := parseBlossomURI(uri); ok {
+			add(hash, urls...)
+			addAuthors(hash, authors)
+		}
+	}
+
 	for tag := range event.Tags.FindAll("imeta") {
 		var hash string
-		var urls []string
+		var urls, authors []string
 		for _, field := range tag[1:] {
 			key, value, ok := strings.Cut(field, " ")
 			if !ok {
@@ -454,7 +511,15 @@ func extractMediaRefs(event nostr.Event) []mediaRef {
 					hash = value
 				}
 			case "url", "fallback":
-				urls = append(urls, value)
+				if uriHash, uriURLs, uriAuthors, ok := parseBlossomURI(value); ok {
+					if hash == "" {
+						hash = uriHash
+					}
+					urls = append(urls, uriURLs...)
+					authors = append(authors, uriAuthors...)
+				} else {
+					urls = append(urls, value)
+				}
 			}
 		}
 		if hash == "" {
@@ -467,6 +532,7 @@ func extractMediaRefs(event nostr.Event) []mediaRef {
 		}
 		if hash != "" {
 			add(hash, urls...)
+			addAuthors(hash, authors)
 		}
 	}
 
@@ -506,7 +572,12 @@ func processBlossomBackup(event nostr.Event) {
 
 			log.Printf("🔄 Trying author's fallback servers for %s", ref.hash[:16]+"...")
 
-			if !downloadFromAltBlossomServers(event.PubKey.Hex(), ref.hash, maxBytes) {
+			authors := slices.DeleteFunc(slices.Clone(ref.authors), func(a string) bool { return a == event.PubKey.Hex() })
+			if len(authors) > maxURIAuthors {
+				authors = authors[:maxURIAuthors]
+			}
+			authors = append(authors, event.PubKey.Hex())
+			if !slices.ContainsFunc(authors, func(a string) bool { return downloadFromAltBlossomServers(a, ref.hash, maxBytes) }) {
 				log.Printf("⚠️  Failed to download Blossom file %s from all available sources", ref.hash[:16]+"...")
 			}
 		}

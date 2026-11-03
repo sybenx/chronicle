@@ -8,6 +8,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - `BLOSSOM_REACTED_MAX_FILE_MB` sets a larger media backup cap for notes the owner reacts to or zaps, 100 MB by default
 - Media backup reads NIP-92 `imeta` tags, including `x` hashes and `fallback` URLs
+- Media backup reads BUD-10 `blossom:` links, trying their `xs` server hints and the server lists of their `as` authors
 
 ### Security
 
