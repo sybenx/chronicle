@@ -104,9 +104,15 @@ func main() {
 	if err := db.Init(); err != nil {
 		panic(err)
 	}
-	store = &db
+	var err error
+	searchIndex, err = newSearchStore(&db, config.DBPath+"search")
+	if err != nil {
+		log.Fatalf("Opening search index: %v", err)
+	}
+	store = searchIndex
 
 	relay.UseEventstore(store, 500)
+	relay.Info.SupportedNIPs = append(relay.Info.SupportedNIPs, 50)
 	protectRestrictedEvents(relay, ownerPubkey)
 	relay.Negentropy = config.Negentropy
 
@@ -145,7 +151,8 @@ func main() {
 	)
 
 	relay.OnRequest = policies.SeqRequest(
-		policies.NoEmptyFilters,
+		searchOwnerOnly(ownerPubkey),
+		noEmptyFiltersExceptSearch,
 		policies.NoComplexFilters,
 		func(ctx context.Context, filter nostr.Filter) (bool, string) {
 			for _, kind := range filter.Kinds {
@@ -297,7 +304,7 @@ func main() {
 	}()
 
 	log.Println("🎉 Relay running on port", config.RelayPort)
-	err := http.ListenAndServe(":"+config.RelayPort, guardBlossomWrites(relay, ownerPubkey))
+	err = http.ListenAndServe(":"+config.RelayPort, guardBlossomWrites(relay, ownerPubkey))
 	if err != nil {
 		log.Fatal(err)
 	}

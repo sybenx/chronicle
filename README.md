@@ -24,6 +24,12 @@ Direct Blossom uploads are restricted to the relay owner.
 
 Chronicle supports NIP-42 auth for gift wrap messages and private notes (see [Manent](https://github.com/dtonon/manent)); the auth check is applied transparently only on the specific events, so you can use your plain host, without any additional path, as private relay.
 
+## Search
+
+Chronicle supports NIP-50 full-text search over the archive, for the relay owner only. Single threads are public, but searching the whole archive would reveal a profile of the owner, so a REQ with a `search` field is refused with `auth-required:` until the client signs NIP-42 auth, and with `restricted:` for any key other than the owner's. Plain reads stay public.
+
+Only profiles (kind 0), notes (kind 1) and articles (kind 30023) are indexed. Gift wraps and private notes are never indexed and never returned by search, even to the owner. The index lives in `search/` inside `DB_PATH`; migration 0004 builds it from the events already stored on first start, and new events are indexed as they are saved. To rebuild it, delete the `search/` folder and set `migrations.txt` back to `3`.
+
 ## Features highlight
 
 It works nicely as an inbox/outbox/DM relay.  

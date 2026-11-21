@@ -39,6 +39,10 @@ func protectRestrictedEvents(relay *khatru.Relay, ownerPubkey nostr.PubKey) {
 		if khatru.IsInternalCall(ctx) || khatru.IsAuthed(ctx, ownerPubkey) {
 			return events
 		}
+		// Search is owner-only; OnRequest refuses it first, this is the backstop
+		if filter.Search != "" {
+			return func(yield func(nostr.Event) bool) {}
+		}
 		return func(yield func(nostr.Event) bool) {
 			for event := range events {
 				if isRestrictedKind(event.Kind) {
